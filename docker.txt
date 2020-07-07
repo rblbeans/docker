@@ -1,0 +1,414 @@
+
+Docker 学习笔记
+
+高级容器引擎：LXC
+内核虚拟化技术：namespace cgroup
+
+通过内核实现的技术：LVS   性能高
+
+
+        Docker与OPENSTACK对比
+
+类别                  Docker                     OpenStack
+
+部署难度            非常简单                组件多，部署复杂
+启动速度            秒级                    分钟级
+执行性能            和物理系统几乎一致        VM会占用一些资源
+镜像体积            镜像是MB级别            虚拟机镜像GB级别
+管理效率            管理简单                组件相互依赖，管理复杂
+隔离性                隔离性高                彻底隔离
+可管理性            单进程                    完成的系统管理
+网络连接            比较弱                    借助Neutron可以灵活组件各类网络架构
+
+Docker安装前准备工作
+
+
+yum install -y yum-utils device-mapper-persistent-data lvm2
+yum-config-manager --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+yum install -y docker-ce python-pip docker-compose
+systemctl enable docker.service
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json <<EOF
+{
+  "registry-mirrors": ["https://7m5svlfk.mirror.aliyuncs.com"]
+}
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+systemctl start docker.service
+
+
+下载镜像
+
+
+    docker pull centos
+    docker pull busybox
+    docker pull mysql
+    docker pull nginx
+    docker pull alpine
+    docker pull aclstack/mem
+    docker pull aclstack/cpu
+    docker pull progrium/consul
+    docker pull sebp/elk
+    docker pull fluent/fluentd
+
+Docker三大特别：build、ship、run     构建、运输、运行
+
+配置Docker 启动TCP端口
+
+    vim /usr/lib/systemd/system/docker.service
+    ExecStart=/usr/bin/dockerd -H tcp://192.168.56.11 -H unix:///var/run/docker.sock
+    docker 默认端口为： 2375
+
+Docker命令讲解：
+
+ 
+
+    docker pull xxx         下载镜像
+    docker search  xxx      搜索镜像
+    docker run     hello-world        run相当于create+start (创建+启动容器) hello-world 是镜像名称
+    docker images     查看镜像
+    docker run -it --name my_centos centos bash
+            -it 以交互终端方式启动(伪终端)
+            --name 起一个名字
+            centos 镜像名称
+            bash 启动完镜像后要执行的命令
+            
+    exit: 退出并关闭所启动的docker容器
+    docker ps 查看正在运行的容器
+    
+    docker attach my_centos    进入容器命令 attach进入  my_centos 容器名称
+    注意：对方使用该命令进入容器后，可以实时相互看到对方执行的命令
+    不关闭docker容器退出快捷键：Ctrl+p+q
+    docker exec -it my_centos bash 进入容器命令 exec 执行命令 -it以交互终端模式 容器名称   执行命令
+    docker ps -a 显示所有的容器
+    docker rm mini_os 删除容器   docker rm -f mini_os 强制删除此容器
+
+
+制作nginx镜像
+   
+
+[root@linux-node1 ~]# docker run -it --name my_nginx centos bash
+    [root@8687ddd0afca /]#
+    [root@8687ddd0afca ~]# yum install -y nginx
+    [root@8687ddd0afca ~]# yum install php-fpm -y
+    [root@8687ddd0afca ~]# yum install -y supervisor -y
+        supervisor 配置文件 /etc/supervisord.conf
+        [root@8687ddd0afca supervisord.d]# vim php_nginx.ini
+        [supervisord]  启动模式以后台进程运行
+        nodaemon=true
+        
+        [program:nginx]  程序名为nginx
+        command=/usr/sbin/nginx -g "daemon off;" 启动命令：以前台方式启动
+        
+        [program:phpfpm]
+        command=/usr/sbin/php-fpm -F -c /etc/php.ini
+        autostart = true           自动启动
+        startsecs = 3            启动3次，超过3次不再启动
+        autorestart = true        自动重启
+        startretries = 3        重启3次后，无法正常重启，不再重启
+        user = root                以root用户方式启动
+        redirect_stderr = false  日志重定向
+        stdout_logfile_maxbytes = 50MB    定义日志大小
+        stdout_logfile_backups = 20
+        
+        [root@8687ddd0afca supervisord.d]# vim php_nginx.ini
+        [root@8687ddd0afca supervisord.d]# supervisord   前台方式运行
+                
+        验证启动进程
+        [root@linux-node1 ~]# docker exec -it my_nginx bash
+        [root@8687ddd0afca /]#
+        [root@8687ddd0afca /]# ps -ef
+        UID         PID   PPID  C STIME TTY          TIME CMD
+        root          1      0  0 Jul11 pts/0    00:00:00 bash
+        root        703      1  0 09:40 pts/0    00:00:00 /usr/bin/python /usr/bin/supervisord
+        root        706    703  0 09:40 pts/0    00:00:00 nginx: master process /usr/sbin/nginx -g
+        root        707    703  0 09:40 pts/0    00:00:00 php-fpm: master process (/etc/php-fpm.con
+        nginx       708    706  0 09:40 pts/0    00:00:00 nginx: worker process
+        nginx       709    706  0 09:40 pts/0    00:00:00 nginx: worker process
+        apache      710    707  0 09:40 pts/0    00:00:00 php-fpm: pool www
+        apache      711    707  0 09:40 pts/0    00:00:00 php-fpm: pool www
+        apache      712    707  0 09:40 pts/0    00:00:00 php-fpm: pool www
+        apache      713    707  0 09:40 pts/0    00:00:00 php-fpm: pool www
+        apache      714    707  0 09:40 pts/0    00:00:00 php-fpm: pool www
+        root        715      0  0 09:42 pts/1    00:00:00 bash
+        root        734    715  0 09:42 pts/1    00:00:00 ps -ef
+        [root@8687ddd0afca /]# ss -tnl
+        State      Recv-Q Send-Q        Local Address:Port                       Peer Address:Port              
+        LISTEN     0      128                       *:80                                    *:*                  
+        LISTEN     0      128               127.0.0.1:9000                                  *:*                  
+        LISTEN     0      128                      :::80                                   :::*         
+        容器上传镜像
+        [root@linux-node1 ~]# docker commit -m "nginx-1.12.2 php-5.4" my_nginx nignx:v1
+        sha256:3e5e4a11b5f31881382ae4785243fc87cafba51dff0523de1132de571a4ed1f2
+        [root@linux-node1 ~]# docker images
+        REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+        nignx               v1                  3e5e4a11b5f3        26 seconds ago      571MB
+        sebp/elk            latest              cd5e6e46d1a2        5 days ago          1.93GB
+        nginx               latest              f68d6e55e065        10 days ago         109MB
+        alpine              latest              4d90542f0623        3 weeks ago         5.58MB
+        busybox             latest              e4db68de4ff2        3 weeks ago         1.22MB
+        启动打包新的镜像
+        [root@linux-node1 ~]# docker run -it -p 80:80 --name=nginx_v1 3e5e4a11b5f3 supervisord    #-p 映射端口
+        /usr/lib/python2.7/site-packages/supervisor/options.py:296: UserWarning: Supervisord is running as root and it is searching for its configuration file in default locations (including its current working directory); you probably want to specify a "-c" argument specifying an absolute path to a configuration file for improved security.
+          'Supervisord is running as root and it is searching '
+        2019-07-12 09:51:45,258 CRIT Supervisor running as root (no user in config file)
+        2019-07-12 09:51:45,259 WARN Included extra file "/etc/supervisord.d/php_nginx.ini" during parsing
+        2019-07-12 09:51:45,276 INFO RPC interface 'supervisor' initialized
+        2019-07-12 09:51:45,276 CRIT Server 'unix_http_server' running without any HTTP authentication checking
+        2019-07-12 09:51:45,276 INFO supervisord started with pid 1
+        2019-07-12 09:51:46,279 INFO spawned: 'nginx' with pid 8
+        2019-07-12 09:51:46,281 INFO spawned: 'phpfpm' with pid 9
+        2019-07-12 09:51:47,383 INFO success: nginx entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+        2019-07-12 09:51:49,386 INFO success: phpfpm entered RUNNING state, process has stayed up for > than 3 seconds (startsecs)
+        配置nginx+php
+        [root@0643a7151a31 html]# vim /etc/nginx/nginx.conf
+                location ~ [^/]\.php(/|$)
+                        {
+                            # comment try_files $uri =404; to enable pathinfo
+                            try_files $uri =404;
+                            fastcgi_pass  127.0.0.1:9000;
+                            fastcgi_index index.php;
+                            include fastcgi.conf;
+                            #include pathinfo.conf;
+                            set $real_script_name $fastcgi_script_name;
+                            if ($fastcgi_script_name ~ "^(.+?\.php)(/.+)$") {
+                                set $real_script_name $1;
+                                set $path_info $2;
+                            }
+                            fastcgi_param SCRIPT_FILENAME $document_root$real_script_name;
+                            fastcgi_param SCRIPT_NAME $real_script_name;
+                            fastcgi_param PATH_INFO $path_info;
+                            fastcgi_param APPLICATION_ENV 'development';
+                        }
+        检查nginx配置语法并启动nginx
+        [root@0643a7151a31 html]# nginx -t
+        nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+        nginx: configuration file /etc/nginx/nginx.conf test is successful
+        [root@0643a7151a31 html]# nginx -s reload
+        查看supervisor启动进程状态
+        [root@0643a7151a31 html]# supervisorctl status
+        nginx                            RUNNING   pid 8, uptime 0:09:36
+        phpfpm                           RUNNING   pid 9, uptime 0:09:36
+        访问验证
+        [root@linux-node2 ~]# curl -I http://192.168.56.11/phpinfo.php
+        HTTP/1.1 200 OK
+        Server: nginx/1.12.2
+        Date: Fri, 12 Jul 2019 02:06:25 GMT
+        Content-Type: text/html
+        Connection: keep-alive
+        X-Powered-By: PHP/5.4.16
+
+
+
+启动并初始化MySQL数据库docker镜像
+ 
+
+   [root@linux-node1 ~]# docker run -it --name=mysql -p 8888:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql
+    [root@linux-node1 ~]# docker run -it --name=mysql -p 8888:3306 --rm -e MYSQL_ROOT_PASSWORD=123456 mysql  #--rm 停止该容器就会被删除
+
+
+安装mysql客户端便于连接测试
+   
+
+    [root@linux-node1 ~]# yum install -y mariadb
+    [root@linux-node1 ~]# docker exec -it mysql bash
+    root@9373eb0d5e57:/# mysql -uroot -p123456
+    Server version: 8.0.16 MySQL Community Server - GPL
+    mysql>  ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '123456';
+    Query OK, 0 rows affected (0.01 sec)
+    mysql> FLUSH PRIVILEGES;
+    Query OK, 0 rows affected (0.00 sec)
+    mysql> \q
+    Bye
+    [root@linux-node1 ~]# mysql -uroot -h 127.0.0.1 -p'123456' -P 8888
+    Welcome to the MariaDB monitor.  Commands end with ; or \g.
+    Your MySQL connection id is 11
+    Server version: 8.0.16 MySQL Community Server - GPL
+    Copyright (c) 2000, 2018, Oracle, MariaDB Corporation Ab and others.
+    Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+    MySQL [(none)]>
+
+
+
+上传Docker镜像到你的Docker Hup仓库
+   
+
+[root@linux-node1 ~]# docker images
+    REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+    nignx               v1                  3e5e4a11b5f3        2 hours ago         571MB
+    sebp/elk            latest              cd5e6e46d1a2        5 days ago          1.93GB
+    nginx               latest              f68d6e55e065        10 days ago         109MB
+    alpine              latest              4d90542f0623        3 weeks ago         5.58MB
+    busybox             latest              e4db68de4ff2        3 weeks ago         1.22MB
+    progrium/consul     latest              09ea64205e55        4 years ago         69.4MB
+    [root@linux-node1 ~]# docker tag 3e5e4a11b5f3 hotxia/lnmp
+    [root@linux-node1 ~]# docker login
+    Login with your Docker ID to push and pull images from Docker Hub. If you don't have a Docker ID, head over to https://hub.docker.com to create one.
+    Username: hotxia
+    Password:
+    WARNING! Your password will be stored unencrypted in /root/.docker/config.json.
+    Configure a credential helper to remove this warning. See
+https://docs.docker.com/engine/reference/commandline/login/#credentials-store
+    Login Succeeded
+    [root@linux-node1 ~]# docker push hotxia/lnmp
+    The push refers to repository [docker.io/hotxia/lnmp]
+
+
+    docker run -it --name=nginx -P nginx nginx  #-P 随机映射端口
+    docker run -it -p 80:80/udp --name=nginx nginx  映射UDP端口
+    docker run -it -p 192.168.56.11:80:80  --name=nginx nginx 指定IPO映射
+
+
+Docker单机容器互通
+   
+
+[root@linux-node1 ~]# docker run -it --name=busybox1 busybox
+    / #
+    [root@linux-node1 ~]# docker run -it --link busybox1:busybox1 --name busybox2 busybox
+    / # cat /etc/hosts
+    127.0.0.1    localhost
+    172.17.0.4    busybox1 08b79732e906
+    172.17.0.6    89c8c2151313
+    / #
+
+
+    查看docker网络
+
+    [root@linux-node1 ~]# docker network ls
+    NETWORK ID          NAME                DRIVER              SCOPE
+    fa11113ccb36        bridge              bridge              local
+    d46a86a43400        host                host                local
+    b11cd11d9758        none                null                local
+
+    创建桥接网络
+   
+
+[root@linux-node1 ~]# docker network create --driver bridge my_net
+    a1bfbed178a5af8ddf2332acdd4f399bb20e68e43423a6042bbef344f2c99661
+
+
+    验证查看创建是否正常
+
+    [root@linux-node1 ~]# docker network ls
+    NETWORK ID          NAME                DRIVER              SCOPE
+    fa11113ccb36        bridge              bridge              local
+    d46a86a43400        host                host                local
+    a1bfbed178a5        my_net              bridge              local
+    b11cd11d9758        none                null                local
+
+
+    创建划分详细IP的网络
+    
+
+[root@linux-node1 ~]# docker network create --driver bridge --subnet 172.22.16.0/24 --gateway 172.22.16.1 my_net2
+    839069d017a0c752744b3db3d0add8a0def86d74d27a2e8b849d1c9c3c79a78b
+
+
+
+    创建容器并加入my_net2网络，划分详细IP地址
+ 
+
+   [root@linux-node1 ~]# docker run -it --rm --network=my_net2 --ip 172.22.16.88 busybox
+    / # ip ad
+    1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1
+        link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+        inet 127.0.0.1/8 scope host lo
+           valid_lft forever preferred_lft forever
+    66: eth0@if67: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue
+        link/ether 02:42:ac:16:10:58 brd ff:ff:ff:ff:ff:ff
+        inet 172.22.16.88/24 brd 172.22.16.255 scope global eth0
+           valid_lft forever preferred_lft forever
+
+
+
+    通过DNS解析。互通主机名
+        1.只存在于用户自定义网络
+        2.容器名不能ping通
+        
+   
+
+[root@linux-node1 ~]# docker run -it --rm --network=my_net2 --ip 172.22.16.88 --name=oldboy1 busybox
+    / # ping oldboy2
+    PING oldboy2 (172.22.16.99): 56 data bytes
+    64 bytes from 172.22.16.99: seq=0 ttl=64 time=0.042 ms
+    64 bytes from 172.22.16.99: seq=1 ttl=64 time=0.060 ms
+
+
+    [root@linux-node1 ~]# docker run -it --rm --network=my_net2 --ip 172.22.16.99 --name=oldboy2 busybox
+    / # ping oldboy1
+    PING oldboy1 (172.22.16.88): 56 data bytes
+    64 bytes from 172.22.16.88: seq=0 ttl=64 time=0.064 ms
+    64 bytes from 172.22.16.88: seq=1 ttl=64 time=0.060 ms
+    解决容器间不在同一网络内实现通信
+    [root@linux-node1 ~]# docker run -it --rm --name=oldboy1 busybox
+    / # ip add
+    1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1
+        link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+        inet 127.0.0.1/8 scope host lo
+           valid_lft forever preferred_lft forever
+    76: eth0@if77: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue
+        link/ether 02:42:ac:11:00:04 brd ff:ff:ff:ff:ff:ff
+        inet 172.17.0.4/16 brd 172.17.255.255 scope global eth0
+           valid_lft forever preferred_lft forever
+    / # ping oldboy
+    ping: bad address 'oldboy'
+    [root@linux-node1 ~]# docker run -it --rm --network=my_net2 --ip 172.22.16.99 --name=oldboy2 busybox
+    / #
+    [root@linux-node1 ~]# docker network connect my_net2 oldboy1
+    [root@linux-node1 ~]# docker run -it --rm --name=oldboy1 busybox
+    / # ip add
+    1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1
+        link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+        inet 127.0.0.1/8 scope host lo
+           valid_lft forever preferred_lft forever
+    76: eth0@if77: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue
+        link/ether 02:42:ac:11:00:04 brd ff:ff:ff:ff:ff:ff
+        inet 172.17.0.4/16 brd 172.17.255.255 scope global eth0
+           valid_lft forever preferred_lft forever
+    78: eth1@if79: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue
+        link/ether 02:42:ac:16:10:02 brd ff:ff:ff:ff:ff:ff
+        inet 172.22.16.2/24 brd 172.22.16.255 scope global eth1
+           valid_lft forever preferred_lft forever
+    / # ping 172.22.16.99
+    PING 172.22.16.99 (172.22.16.99): 56 data bytes
+    64 bytes from 172.22.16.99: seq=0 ttl=64 time=0.118 ms
+    64 bytes from 172.22.16.99: seq=1 ttl=64 time=0.059 ms
+    64 bytes from 172.22.16.99: seq=2 ttl=64 time=0.060 ms
+    ^C
+    --- 172.22.16.99 ping statistics ---
+    3 packets transmitted, 3 packets received, 0% packet loss
+    round-trip min/avg/max = 0.059/0.079/0.118 ms
+docker-compose 容器编排工具
+    安装
+    pip install docker-compose
+    启动
+    [root@linux-node1 opt]# docker-compose -f docker-compose.yml up -d # -d 放入后台进程启动
+
+docker 数据管理
+
+分为两大部分： 数据卷           数据卷容器
+
+Docker安装私有仓库 Harbor
+
+  
+
+  wget http://192.168.0.62/tools/harbor-offline-installer-v1.8.1.tgz
+    tar xf harbor-offline-installer-v1.8.1.tgz
+    
+    [root@linux-node1 ~]# cat harbor/harbor.yml
+    hostname: 192.168.56.11
+    harbor_admin_password: 'Toprs!@#123'
+    
+    [root@linux-node1 harbor]# sh install.sh
+    
+    配置登录私有仓库443 ssl 错误
+    [root@linux-node1 ~]# cat /etc/docker/daemon.json
+    {
+      "registry-mirrors": ["https://7m5svlfk.mirror.aliyuncs.com"],
+       "insecure-registries": ["192.168.56.11"]
+    }
+    docker images
+    docker tag 4d90542f0623 192.168.56.11/library/alpine:v1
+    docker push 192.168.56.11/library/alpine:v1
+
